@@ -1,0 +1,11 @@
+_BASE_: '../single_timeframe.yml'
+
+TAG: 'argoverse_single_frame'
+
+DATASET:
+  NAME: 'argoverse'
+
+IMAGE:
+  H: 1080
+  W: 1920
+  RESIZE_SCALE: 0.25

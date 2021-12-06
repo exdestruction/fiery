@@ -284,6 +284,7 @@ def visualise_output(labels, output, cfg):
 
 def convert_figure_numpy(figure):
     """ Convert figure to numpy image """
+    figure.canvas.draw()
     figure_np = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8)
     figure_np = figure_np.reshape(figure.canvas.get_width_height()[::-1] + (3,))
     return figure_np

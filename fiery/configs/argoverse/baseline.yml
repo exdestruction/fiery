@@ -1,0 +1,20 @@
+_BASE_: '../baseline.yml'
+
+TAG: 'argoverse_baseline'
+
+GPUS: [0]
+
+BATCHSIZE: 3
+TIME_RECEPTIVE_FIELD: 10
+N_FUTURE_FRAMES: 20
+
+DATASET:
+  NAME: 'argoverse'
+
+IMAGE:
+  H: 1080
+  W: 1920
+  RESIZE_SCALE: 0.25
+
+MODEL:
+  SUBSAMPLE: True
