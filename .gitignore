@@ -1,6 +1,7 @@
 tensorboard_logs/
 example_data/
 output_vis/
+data/
 .idea/
 *.pyc
 *.ipynb_checkpoints

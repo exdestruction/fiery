@@ -34,7 +34,7 @@ _C.LOG_DIR = 'tensorboard_logs'
 _C.TAG = 'default'
 
 _C.GPUS = [0]  # which gpus to use
-_C.PRECISION = 32  # 16bit or 32bit
+_C.PRECISION = 16  # 16bit or 32bit
 _C.BATCHSIZE = 3
 _C.EPOCHS = 20
 
@@ -62,6 +62,8 @@ _C.IMAGE.RESIZE_SCALE = 0.3
 _C.IMAGE.TOP_CROP = 46
 _C.IMAGE.ORIGINAL_HEIGHT = 900  # Original input RGB camera height
 _C.IMAGE.ORIGINAL_WIDTH = 1600  # Original input RGB camera width
+_C.IMAGE.H = 900
+_C.IMAGE.W = 1600
 _C.IMAGE.NAMES = ['CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT', 'CAM_BACK', 'CAM_BACK_RIGHT']
 
 _C.LIFT = CN()  # image to BEV lifting

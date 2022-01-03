@@ -10,6 +10,7 @@ N_FUTURE_FRAMES: 20
 
 DATASET:
   NAME: 'argoverse'
+  DATAROOT: './data/argoverse'
 
 IMAGE:
   H: 1080
