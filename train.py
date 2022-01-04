@@ -13,7 +13,8 @@ from fiery.trainer import TrainingModule
 
 
 def main(args):
-	cfg = get_cfg(args)
+	cfg = get_cfg()
+	# cfg = get_cfg(args)
 
 	trainloader, valloader = prepare_dataloaders(cfg)
 	model = TrainingModule(cfg.convert_to_dict())

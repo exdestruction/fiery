@@ -13,7 +13,7 @@ DATASET:
   DATAROOT: './data/argoverse'
 
 IMAGE:
-  H: 1080
+  H: 1200
   W: 1920
   RESIZE_SCALE: 0.25
 

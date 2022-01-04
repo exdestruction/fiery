@@ -3,6 +3,7 @@ example_data/
 output_vis/
 data/
 .idea/
+.vscode/
 *.pyc
 *.ipynb_checkpoints
 *.ipynb
