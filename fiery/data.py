@@ -444,6 +444,7 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 
 		self.frames_in_past = self.cfg.TIME_RECEPTIVE_FIELD
 		self.frames_in_future = self.cfg.N_FUTURE_FRAMES
+		assert self.frames_in_future >= 0 and self.frames_in_past >=0
 
 		self.bev_xbound = self.cfg.LIFT.X_BOUND
 		self.bev_ybound = self.cfg.LIFT.Y_BOUND
@@ -493,8 +494,9 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		for log in self.scene_logs:
 			self.dataset.current_log = log
 			n_images = len(self.dataset.image_list_sync[self.camera_names[0]])
-			for idx in range(0, n_images - self.frames_in_future):
+			for idx in range(0, n_images - self.sequence_length):
 				sequence = {'log': log, 'frames_ids': [i for i in range(idx, idx + self.sequence_length)]}
+				assert sequence['frames_ids'][-1] <= n_images
 				sequences.append(sequence)
 
 		return sequences
@@ -521,8 +523,7 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 				'crop': crop,
 				}
 
-	def __get_data_timestamp(self, log: str, frame_id: int) \
-		-> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+	def __get_data_timestamp(self, log_id: str, frame_id: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 		"""
 		Parameters
 		----------
@@ -546,7 +547,7 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		for cam in self.camera_names:
 			# -------images part---------
 			# get image syncronised with lidar (10Hz instead of 30hz) 
-			image_filename = self.dataset.get_image_sync(frame_id, camera=cam, log_id=log, load=False)
+			image_filename = self.dataset.get_image_sync(frame_id, camera=cam, log_id=log_id, load=False)
 			img = Image.open(image_filename)
 			img = resize_and_crop_image(img, 
 				resize_dims=self.augmentation_parameters['resize_dims'], 
@@ -555,7 +556,7 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 			images.append(img.unsqueeze(0).unsqueeze(0))
 
 			
-			calibration = self.dataset.get_calibration(camera=cam, log_id=log)
+			calibration = self.dataset.get_calibration(camera=cam, log_id=log_id)
 			# -------intrinsics part---------
 			intrinsics_matrix = torch.from_numpy(calibration.K[0:3, 0:3])
 			top_crop = self.augmentation_parameters['crop'][1]
@@ -574,6 +575,31 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 										  torch.cat(extrinsics, dim=1))
 
 		return images, intrinsics, extrinsics
+	
+	def __get_future_egomotion(self, log_id: str, frame_id: int) -> torch.Tensor:
+		"""
+		Get relative motion between present egovehicle position in the city(frame) 
+		and next egovehicle position in the city.
+
+		Parameters:
+			log_id: log id of argoverse dataset log
+			frame_id: current frame in the sequence
+			last_frame: last frame in the sequence
+
+		Returns:
+			future_motion: torch.Tensor<float> (1, 6) -> 
+				6 -> Relative egomotion in form of 6DoF (tx, ty, tz, rx, ry, rz)
+		"""
+
+		present_T_ego_to_city = self.dataset.get_pose(idx=frame_id, log_id=log_id).transform_matrix
+		next_T_ego_to_city = self.dataset.get_pose(idx=frame_id+1, log_id=log_id).transform_matrix
+		T_next_to_present = np.linalg.inv(present_T_ego_to_city).dot(next_T_ego_to_city)
+
+		future_egomotion = torch.Tensor(T_next_to_present).float()
+
+		# Convert to 6DoF vector
+		future_egomotion = mat2pose_vec(future_egomotion)
+		return future_egomotion.unsqueeze(0)
 
 	def __len__(self):
 		return len(self.frames_sequences)
@@ -603,8 +629,8 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 
 		"""
 		data = {}
-		keys = ['image', 'intrinsics', 'extrinsics',
-				# 'segmentation', 'instance', 'centerness', 'offset', 'flow', 'future_egomotion',
+		keys = ['image', 'intrinsics', 'extrinsics', 'future_egomotion',
+				# 'segmentation', 'instance', 'centerness', 'offset', 'flow',
 				# 'sample_token',
 				# 'z_position', 'attribute'
 				]
@@ -613,21 +639,28 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 
 		instance_map = {}
 		
-		log = self.frames_sequences[index]['log']
-		frames_ids = self.frames_sequences[index]['frames_ids']
+		sequence = self.frames_sequences[index]
+		log_id = sequence['log']
+		frames_ids = sequence['frames_ids']
 
 		# Loop over all the frames in the sequence.
 		for frame_id in frames_ids:
-			images, intrinsics, extrinsics = self.__get_data_timestamp(log, frame_id)
+			images, intrinsics, extrinsics = self.__get_data_timestamp(log_id, frame_id)
 			# segmentation, instance, z_position, instance_map, attribute_label = self.get_label(rec, instance_map)
-			# future_egomotion = self.get_future_egomotion(rec, index_t)
+			
+			# corresponding to frame_id future_egomotion contains 
+			# the motion between the frame and the next frame
+			if frame_id == frames_ids[-1]:
+				future_egomotion = torch.Tensor([0,0,0,0,0,0]).unsqueeze(0)
+			else:
+				future_egomotion = self.__get_future_egomotion(log_id, frame_id)
 
 			data['image'].append(images)
 			data['intrinsics'].append(intrinsics)
 			data['extrinsics'].append(extrinsics)
 			# data['segmentation'].append(segmentation)
 			# data['instance'].append(instance)
-			# data['future_egomotion'].append(future_egomotion)
+			data['future_egomotion'].append(future_egomotion)
 			# data['sample_token'].append(rec['token'])
 			# data['z_position'].append(z_position)
 			# data['attribute'].append(attribute_label)
