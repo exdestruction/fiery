@@ -37,9 +37,9 @@ def _normalise(image: np.ndarray) -> np.ndarray:
     return image
 
 
-def apply_colour_map(
-    image: np.ndarray, cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, autoscale: bool = False
-) -> np.ndarray:
+def apply_colour_map(image: np.ndarray, 
+					cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, 
+					autoscale: bool = False) -> np.ndarray:
     """
     Applies a colour map to the given 1 or 2 channel numpy image. if 2 channel, must be 2xHxW.
     Returns a HxWx3 numpy image

@@ -30,7 +30,8 @@ EXAMPLE_DATA_PATH = 'example_data'
 
 def plot_prediction(image, output, cfg):
 	# Process predictions
-	consistent_instance_seg, matched_centers = predict_instance_segmentation_and_trajectories(output, compute_matched_centers=True)
+	consistent_instance_seg, matched_centers = \
+		predict_instance_segmentation_and_trajectories(output, compute_matched_centers=True)
 
 	# Plot future trajectories
 	unique_ids = torch.unique(consistent_instance_seg[0, 0]).cpu().long().numpy()[1:]
@@ -62,8 +63,7 @@ def plot_prediction(image, output, cfg):
 
 	denormalise_img = torchvision.transforms.Compose(
 		(NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-		 torchvision.transforms.ToPILImage(),)
-	)
+		 torchvision.transforms.ToPILImage(),))
 	for imgi, img in enumerate(image[0, -1]):
 		ax = plt.subplot(gs[imgi // 3, imgi % 3])
 		showimg = denormalise_img(img.cpu())
@@ -120,14 +120,8 @@ def get_input_data_timestamp(loader, frame_idx, log_idx)-> None:
 
 def visualise(args):
 	checkpoint_path = args.checkpoint
-	# cfg = get_cfg(args.config)
 
-	# trainer = TrainingModule(cfg)
 	trainer = TrainingModule.load_from_checkpoint(checkpoint_path)
-	# trainer.cfg.TIME_RECEPTIVE_FIELD = 1
-	# trainer.cfg.N_FUTURE_FRAMES = 0
-	# trainer.cfg.MODEL.TEMPORAL_MODEL.NAME = 'identity'
-	# trainer.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE = False
 
 	# trainer.cfg.
 

@@ -8,15 +8,19 @@ import pytorch_lightning as pl
 from pytorch_lightning.plugins import DDPPlugin
 
 from fiery.config import get_parser, get_cfg
-from fiery.data import prepare_dataloaders
+from fiery.data import prepare_dataloaders, prepare_argoverse
 from fiery.trainer import TrainingModule
 
 
 def main(args):
-	cfg = get_cfg()
-	# cfg = get_cfg(args)
+	# cfg = get_cfg()
+	cfg = get_cfg(args)
 
-	trainloader, valloader = prepare_dataloaders(cfg)
+	if cfg.DATASET.NAME == 'argoverse':
+		trainloader, valloader = prepare_argoverse(cfg)
+	else:
+		trainloader, valloader = prepare_dataloaders(cfg)
+
 	model = TrainingModule(cfg.convert_to_dict())
 
 	if cfg.PRETRAINED.LOAD_WEIGHTS:

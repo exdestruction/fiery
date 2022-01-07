@@ -8,6 +8,9 @@ import cv2
 import torch
 import torchvision
 
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+
 from pyquaternion import Quaternion
 from nuscenes.nuscenes import NuScenes
 from nuscenes.utils.splits import create_splits_scenes
@@ -30,6 +33,8 @@ from fiery.utils.geometry import (
 from fiery.utils.instance import convert_instance_mask_to_center_and_offset_label
 from fiery.utils.lyft_splits import TRAIN_LYFT_INDICES, VAL_LYFT_INDICES
 from fiery.config import get_cfg
+from fiery.utils.network import NormalizeInverse
+from fiery.utils.visualisation import plot_instance_map, generate_instance_colours, make_contour, convert_figure_numpy
 
 from argoverse.data_loading.argoverse_tracking_loader import ArgoverseTrackingLoader
 
@@ -437,8 +442,14 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
 # Argoverse Future Prediction Dataset
 class ArgoverseFPD(torch.utils.data.Dataset):
-	def __init__(self, cfg, datapath='data/argoverse-train', train=False):
-		self.dataset = ArgoverseTrackingLoader(datapath)
+	def __init__(self, cfg, train=False):
+		if train:
+			self.datapath='data/argoverse-train'
+		else:
+			self.datapath='data/argoverse'
+
+		self.dataset = ArgoverseTrackingLoader(self.datapath)
+
 		self.cfg = cfg
 		self.is_train = train
 
@@ -474,9 +485,11 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		# Normalising input images
 		self.normalise_image = torchvision.transforms.Compose(
 			[torchvision.transforms.ToTensor(),
-			 torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-			]
-		)
+			 torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),])
+		
+		self.denormalise_img = torchvision.transforms.Compose(
+			(NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+		 		torchvision.transforms.ToPILImage(),))
 
 		# Bird's-eye view parameters
 		bev_resolution, bev_start_position, bev_dimension = calculate_birds_eye_view_parameters(
@@ -601,6 +614,60 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		future_egomotion = mat2pose_vec(future_egomotion)
 		return future_egomotion.unsqueeze(0)
 
+	def __get_label(self, log_id: str, frame_id: int, instance_map: dict):
+		segmentation_np, instance_np, z_position_np, instance_map, attribute_label_np = \
+			self.__get_birds_eye_view_label(log_id, frame_id, instance_map)
+		segmentation = torch.from_numpy(segmentation_np).long().unsqueeze(0).unsqueeze(0)
+		instance = torch.from_numpy(instance_np).long().unsqueeze(0)
+		z_position = torch.from_numpy(z_position_np).float().unsqueeze(0).unsqueeze(0)
+		attribute_label = torch.from_numpy(attribute_label_np).long().unsqueeze(0).unsqueeze(0)
+
+		return segmentation, instance, z_position, instance_map, attribute_label
+
+	def __get_birds_eye_view_label(self, log_id, frame_id, instance_map):
+		## Transformation from global frane to egovehicle
+		# translation, rotation = self.__get_top_lidar_pose(log_id, frame_id)
+
+		segmentation = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+		# Background is ID 0
+		instance = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+		z_position = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+		attribute_label = np.zeros((self.bev_dimension[0], self.bev_dimension[1]))
+
+		labeled_objects = self.dataset.get_label_object(frame_id, log_id)
+		only_vehicles = [obj for obj in labeled_objects if obj.label_class in ['VEHICLE', 'LARGE_VEHICLE', 'MOPED']]
+
+		for vehicle in only_vehicles:
+
+			# correspond unique vehicle with the color on instance map
+			if vehicle.track_id not in instance_map:
+				instance_map[vehicle.track_id] = len(instance_map) + 1
+			instance_id = instance_map[vehicle.track_id]
+
+			instance_attribute = int(vehicle.occlusion)
+
+			poly_region, z = self.__get_poly_region_in_image(vehicle)
+			cv2.fillPoly(instance, [poly_region], instance_id)
+			cv2.fillPoly(segmentation, [poly_region], 1.0)
+			cv2.fillPoly(z_position, [poly_region], z)
+			cv2.fillPoly(attribute_label, [poly_region], instance_attribute)
+
+		return segmentation, instance, z_position, instance_map, attribute_label
+
+	def __get_poly_region_in_image(self, vehicle_object):
+		box = vehicle_object.as_3d_bbox()
+		bottom_corners = box[[2,3,7,6]]
+
+		# get only x,y of all corners
+		pts = bottom_corners[:,:2]
+		# convert to the frame of BEV
+		pts = np.round((pts - self.bev_start_position[:2] + self.bev_resolution[:2] / 2.0) / self.bev_resolution[:2]).astype(np.int32)
+		# change x and y to show x-axis of the vehicle to point up on the BEV
+		pts[:, [1, 0]] = pts[:, [0, 1]]
+
+		z = bottom_corners[0,2]
+		return pts, z
+
 	def __len__(self):
 		return len(self.frames_sequences)
 	
@@ -623,16 +690,16 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 				flow: torch.Tensor<float> (T, 2, H_bev, W_bev)
 				future_egomotion: torch.Tensor<float> (T, 6)
 					6 DoF egomotion t -> t+1
-				sample_token: List<str> (T,)
+				log_id: str, id of log in argoverse dataset
 				'z_position': list_z_position,
 				'attribute': list_attribute_label,
 
 		"""
 		data = {}
 		keys = ['image', 'intrinsics', 'extrinsics', 'future_egomotion',
-				# 'segmentation', 'instance', 'centerness', 'offset', 'flow',
-				# 'sample_token',
-				# 'z_position', 'attribute'
+				'segmentation', 'instance', 'centerness', 'offset', 'flow',
+				'log_id',
+				'z_position', 'attribute'
 				]
 		for key in keys:
 			data[key] = []
@@ -643,10 +710,13 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		log_id = sequence['log']
 		frames_ids = sequence['frames_ids']
 
+		data['log_id'] = log_id
+
 		# Loop over all the frames in the sequence.
 		for frame_id in frames_ids:
 			images, intrinsics, extrinsics = self.__get_data_timestamp(log_id, frame_id)
-			# segmentation, instance, z_position, instance_map, attribute_label = self.get_label(rec, instance_map)
+			segmentation, instance, z_position, instance_map, attribute_label = \
+				self.__get_label(log_id, frame_id, instance_map)
 			
 			# corresponding to frame_id future_egomotion contains 
 			# the motion between the frame and the next frame
@@ -658,63 +728,125 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 			data['image'].append(images)
 			data['intrinsics'].append(intrinsics)
 			data['extrinsics'].append(extrinsics)
-			# data['segmentation'].append(segmentation)
-			# data['instance'].append(instance)
+			data['segmentation'].append(segmentation)
+			data['instance'].append(instance)
 			data['future_egomotion'].append(future_egomotion)
-			# data['sample_token'].append(rec['token'])
-			# data['z_position'].append(z_position)
-			# data['attribute'].append(attribute_label)
+			data['z_position'].append(z_position)
+			data['attribute'].append(attribute_label)
 
 		for key, value in data.items():
-			if key in ['sample_token', 'centerness', 'offset', 'flow']:
+			if key in ['log_id', 'centerness', 'offset', 'flow']:
 				continue
 			data[key] = torch.cat(value, dim=0)
 
-		# instance_centerness, instance_offset, instance_flow = convert_instance_mask_to_center_and_offset_label(
-		# 	data['instance'], data['future_egomotion'],
-		# 	num_instances=len(instance_map), ignore_index=self.cfg.DATASET.IGNORE_INDEX, subtract_egomotion=True,
-		# 	spatial_extent=self.spatial_extent,
-		# )
-		# data['centerness'] = instance_centerness
-		# data['offset'] = instance_offset
-		# data['flow'] = instance_flow
+		instance_centerness, instance_offset, instance_flow = convert_instance_mask_to_center_and_offset_label(
+			data['instance'], data['future_egomotion'],
+			num_instances=len(instance_map), ignore_index=self.cfg.DATASET.IGNORE_INDEX, subtract_egomotion=True,
+			spatial_extent=self.spatial_extent,
+		)
+		data['centerness'] = instance_centerness
+		data['offset'] = instance_offset
+		data['flow'] = instance_flow
 		return data
+	
+
+	def visualize_sample(self, data_sample):
+		
+		#configure plot
+		val_w = 2.99
+		cameras = self.camera_names
+		image_ratio = self.image_final_size_wh[1] / self.image_final_size_wh[0]
+		val_h = val_w * image_ratio
+		fig = plt.figure(figsize=(5 * val_w, 2 * val_h))
+		width_ratios = (val_w, val_w, val_w, val_w, val_w)
+		gs = mpl.gridspec.GridSpec(2, 5, width_ratios=width_ratios)
+		gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
+
+		# plot images
+		images = data_sample['image']
+		for img_id, img in enumerate(images[0, :]):
+			ax = plt.subplot(gs[img_id // 4, img_id % 4])
+			showimg = self.denormalise_img(img.cpu())
+			plt.annotate(cameras[img_id], (0.01, 0.87), c='white',
+						xycoords='axes fraction', fontsize=14)
+			plt.imshow(showimg)
+			plt.axis('off')
+			# ax.set_title(self.camera_names[img_id])
+		
+		# plot segmentation image
+		instance_image = data_sample['instance']
+		unique_ids = torch.unique(instance_image[0]).cpu().long().numpy()[1:]
+		instance_map = dict(zip(unique_ids, unique_ids))
+		segmentation_img = plot_instance_map(instance_image[0].cpu().numpy(), instance_map)
+		# segmentation_img = segmentation_img.reshape((segmentation_img.shape[-3], segmentation_img.shape[-2]))
+
+		ax = plt.subplot(gs[:,-1])
+		
+		showimg = Image.fromarray(segmentation_img[::-1,::-1])
+		plt.imshow(showimg)
+		plt.axis('off')
+		
+		plt.draw()
+		plt.waitforbuttonpress()
+		plt.close()
+		
 
 
-# def prepare_dataloaders(cfg, return_dataset=False):
-# 	version = cfg.DATASET.VERSION
-# 	train_on_training_data = True
+def prepare_dataloaders(cfg, return_dataset=False):
+	version = cfg.DATASET.VERSION
+	train_on_training_data = True
 
-# 	if cfg.DATASET.NAME == 'nuscenes':
-# 		# 28130 train and 6019 val
-# 		dataroot = os.path.join(cfg.DATASET.DATAROOT, version)
-# 		dataset = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
-# 	elif cfg.DATASET.NAME == 'lyft':
-# 		# train contains 22680 samples
-# 		# we split in 16506 6174
-# 		dataroot = os.path.join(cfg.DATASET.DATAROOT, 'trainval')
-# 		dataset = LyftDataset(data_path=dataroot,
-# 						   json_path=os.path.join(dataroot, 'train_data'),
-# 						   verbose=True)
+	if cfg.DATASET.NAME == 'nuscenes':
+		# 28130 train and 6019 val
+		dataroot = os.path.join(cfg.DATASET.DATAROOT, version)
+		dataset = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
+	elif cfg.DATASET.NAME == 'lyft':
+		# train contains 22680 samples
+		# we split in 16506 6174
+		dataroot = os.path.join(cfg.DATASET.DATAROOT, 'trainval')
+		dataset = LyftDataset(data_path=dataroot,
+						   json_path=os.path.join(dataroot, 'train_data'),
+						   verbose=True)
 
-# 	traindata = FuturePredictionDataset(dataset, train_on_training_data, cfg)
-# 	valdata = FuturePredictionDataset(dataset, False, cfg)
+	traindata = FuturePredictionDataset(dataset, train_on_training_data, cfg)
+	valdata = FuturePredictionDataset(dataset, False, cfg)
 
-# 	if cfg.DATASET.VERSION == 'mini':
-# 		traindata.indices = traindata.indices[:10]
-# 		valdata.indices = valdata.indices[:10]
+	if cfg.DATASET.VERSION == 'mini':
+		traindata.indices = traindata.indices[:10]
+		valdata.indices = valdata.indices[:10]
 
-# 	nworkers = cfg.N_WORKERS
-# 	trainloader = torch.utils.data.DataLoader(
-# 		traindata, batch_size=cfg.BATCHSIZE, shuffle=True, num_workers=nworkers, pin_memory=True, drop_last=True
-# 	)
-# 	valloader = torch.utils.data.DataLoader(
-# 		valdata, batch_size=cfg.BATCHSIZE, shuffle=False, num_workers=nworkers, pin_memory=True, drop_last=False)
+	nworkers = cfg.N_WORKERS
+	trainloader = torch.utils.data.DataLoader(
+		traindata, batch_size=cfg.BATCHSIZE, shuffle=True, num_workers=nworkers, pin_memory=True, drop_last=True
+	)
+	valloader = torch.utils.data.DataLoader(
+		valdata, batch_size=cfg.BATCHSIZE, shuffle=False, num_workers=nworkers, pin_memory=True, drop_last=False)
 
-# 	if return_dataset:
-# 		return trainloader, valloader, traindata, valdata
-# 	else:
-# 		return trainloader, valloader
+	if return_dataset:
+		return trainloader, valloader, traindata, valdata
+	else:
+		return trainloader, valloader
+
+def prepare_argoverse(cfg, mini_version=False, return_dataset=False):
+
+	traindata = ArgoverseFPD(cfg, train=True)
+	valdata = ArgoverseFPD(cfg, train=False)
+
+	if mini_version:
+		traindata = traindata[:10]
+		valdata = valdata[:10]
+
+	nworkers = cfg.N_WORKERS
+	trainloader = torch.utils.data.DataLoader(
+		traindata, batch_size=cfg.BATCHSIZE, shuffle=True, num_workers=nworkers, pin_memory=True, drop_last=True
+	)
+	valloader = torch.utils.data.DataLoader(
+		valdata, batch_size=cfg.BATCHSIZE, shuffle=False, num_workers=nworkers, pin_memory=True, drop_last=False)
+
+	if return_dataset:
+		return trainloader, valloader, traindata, valdata
+	else:
+		return trainloader, valloader
 
 
 if __name__ == "__main__":
@@ -722,8 +854,17 @@ if __name__ == "__main__":
 	parser = argparse.ArgumentParser(description='Fiery training')
 	parser.add_argument('--config-file', 
 		default='fiery/configs/argoverse/baseline.yml', metavar='FILE', help='path to config file')
+	parser.add_argument('--nuscenes', default=False, help='True enables NuScenes dataset to debug on')
 	args = parser.parse_args()
-	cfg = get_cfg(args)
 	
-	obj = ArgoverseFPD(cfg)
-	sample = obj[0]
+	if args.nuscenes:
+		cfg = get_cfg()
+		dataroot = os.path.join(cfg.DATASET.DATAROOT, cfg.DATASET.VERSION)
+		dataset = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
+		traindata = FuturePredictionDataset(dataset, is_train=True, cfg=cfg)
+	else:
+		cfg = get_cfg(args)
+
+	argoverse = ArgoverseFPD(cfg)
+	something = argoverse.visualize_sample(argoverse[0])
+		# sample = obj[0]

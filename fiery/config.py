@@ -48,8 +48,8 @@ _C.PRETRAINED.PATH = ''
 
 _C.DATASET = CN()
 _C.DATASET.DATAROOT = './data/nuscenes/'
-# _C.DATASET.VERSION = 'trainval'
-_C.DATASET.VERSION = 'mini'
+_C.DATASET.VERSION = 'trainval'
+# _C.DATASET.VERSION = 'mini'
 _C.DATASET.NAME = 'nuscenes'
 _C.DATASET.IGNORE_INDEX = 255  # Ignore index when creating flow/offset labels
 _C.DATASET.FILTER_INVISIBLE_VEHICLES = True  # Filter vehicles that are not visible from the cameras
