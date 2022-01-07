@@ -13,6 +13,7 @@ from fiery.trainer import TrainingModule
 
 
 def main(args):
+	torch.cuda.empty_cache()
 	# cfg = get_cfg()
 	cfg = get_cfg(args)
 
@@ -35,6 +36,9 @@ def main(args):
 	save_dir = os.path.join(
 		cfg.LOG_DIR, time.strftime('%d%B%Yat%H:%M:%S%Z') + '_' + socket.gethostname() + '_' + cfg.TAG
 	)
+
+	
+
 	tb_logger = pl.loggers.TensorBoardLogger(save_dir=save_dir)
 	trainer = pl.Trainer(
 		gpus=cfg.GPUS,

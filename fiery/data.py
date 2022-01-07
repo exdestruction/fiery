@@ -442,9 +442,9 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
 # Argoverse Future Prediction Dataset
 class ArgoverseFPD(torch.utils.data.Dataset):
-	def __init__(self, cfg, train=False):
+	def __init__(self, cfg, mini_set=False, train=False):
 		if train:
-			self.datapath='data/argoverse-train'
+			self.datapath='data/argoverse'
 		else:
 			self.datapath='data/argoverse'
 
@@ -478,6 +478,9 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 
 		# form sequences of frames of length self.sequence_length
 		self.frames_sequences = self.__form_frames_sequences()
+		
+		if mini_set:
+			self.frames_sequences = self.frames_sequences[:10]
 
 		# Image resizing and cropping
 		self.augmentation_parameters = self.__get_resizing_and_cropping_parameters()
@@ -574,7 +577,7 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 			intrinsics_matrix = torch.from_numpy(calibration.K[0:3, 0:3])
 			top_crop = self.augmentation_parameters['crop'][1]
 			left_crop = self.augmentation_parameters['crop'][0]
-			intrinsics_matrix = update_intrinsics(intrinsics_matrix, top_crop, left_crop,
+			intrinsics_matrix = update_intrinsics(intrinsics_matrix.float(), top_crop, left_crop,
 				scale_width=self.augmentation_parameters['scale_width'],
 				scale_height=self.augmentation_parameters['scale_height'])
 			intrinsics.append(intrinsics_matrix.unsqueeze(0).unsqueeze(0))
@@ -827,14 +830,15 @@ def prepare_dataloaders(cfg, return_dataset=False):
 	else:
 		return trainloader, valloader
 
-def prepare_argoverse(cfg, mini_version=False, return_dataset=False):
+def prepare_argoverse(cfg, mini_version=True, return_dataset=False):
 
-	traindata = ArgoverseFPD(cfg, train=True)
-	valdata = ArgoverseFPD(cfg, train=False)
 
 	if mini_version:
-		traindata = traindata[:10]
-		valdata = valdata[:10]
+		traindata = ArgoverseFPD(cfg, mini_set=True, train=True)
+		valdata = ArgoverseFPD(cfg, mini_set=True, train=False)
+	else:
+		traindata = ArgoverseFPD(cfg, train=True)
+		valdata = ArgoverseFPD(cfg, train=False)
 
 	nworkers = cfg.N_WORKERS
 	trainloader = torch.utils.data.DataLoader(
@@ -866,5 +870,5 @@ if __name__ == "__main__":
 		cfg = get_cfg(args)
 
 	argoverse = ArgoverseFPD(cfg)
-	something = argoverse.visualize_sample(argoverse[0])
+	something = argoverse.visualize_sample(argoverse[9])
 		# sample = obj[0]
