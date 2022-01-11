@@ -510,8 +510,8 @@ class ArgoverseFPD(torch.utils.data.Dataset):
 		for log in self.scene_logs:
 			self.dataset.current_log = log
 			n_images = len(self.dataset.image_list_sync[self.camera_names[0]])
-			for idx in range(0, n_images - self.sequence_length):
-				sequence = {'log': log, 'frames_ids': [i for i in range(idx, idx + self.sequence_length)]}
+			for idx in range(0, n_images - self.sequence_length * 5, 5):
+				sequence = {'log': log, 'frames_ids': [i for i in range(idx, idx + self.sequence_length * 5, 5)]}
 				assert sequence['frames_ids'][-1] <= n_images
 				sequences.append(sequence)
 
