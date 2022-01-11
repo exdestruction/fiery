@@ -18,7 +18,7 @@ def main(args):
 	cfg = get_cfg(args)
 
 	if cfg.DATASET.NAME == 'argoverse':
-		trainloader, valloader = prepare_argoverse(cfg)
+		trainloader, valloader = prepare_argoverse(cfg, mini_version=True)
 	else:
 		trainloader, valloader = prepare_dataloaders(cfg)
 
