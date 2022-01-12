@@ -4,6 +4,7 @@ TAG: 'argoverse_baseline'
 
 GPUS: [0]
 
+
 BATCHSIZE: 1
 TIME_RECEPTIVE_FIELD: 2
 N_FUTURE_FRAMES: 4
