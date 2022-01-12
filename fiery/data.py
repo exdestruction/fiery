@@ -444,9 +444,9 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 class ArgoverseFPD(torch.utils.data.Dataset):
 	def __init__(self, cfg, mini_set=False, train=False):
 		if train:
-			self.datapath='data/argoverse'
+			self.datapath='data/argoverse-train'
 		else:
-			self.datapath='data/argoverse'
+			self.datapath='data/argoverse-val'
 
 		self.dataset = ArgoverseTrackingLoader(self.datapath)
 
