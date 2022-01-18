@@ -128,7 +128,7 @@ def visualise(checkpoint_path):
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Fiery visualisation')
-    parser.add_argument('--checkpoint', default='./fiery.ckpt', type=str, help='path to checkpoint')
+    parser.add_argument('--checkpoint', default='checkpoints/fiery.ckpt', type=str, help='path to checkpoint')
 
     args = parser.parse_args()
 

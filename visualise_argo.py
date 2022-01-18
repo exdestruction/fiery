@@ -1,6 +1,7 @@
 import os
 from argparse import ArgumentParser
 from glob import glob
+from re import M
 from warnings import showwarning
 from argoverse.visualization.mayavi_utils import Figure
 
@@ -11,8 +12,9 @@ import torchvision
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from PIL import Image
+from tqdm import tqdm
 
-from fiery.data import prepare_dataloaders
+from fiery.data import prepare_argoverse
 from fiery.config import get_parser, get_cfg
 from fiery.utils.geometry import mat2pose_vec
 from fiery.trainer import TrainingModule
@@ -56,26 +58,26 @@ def plot_prediction(image, output, cfg):
 	cameras = cfg.IMAGE.NAMES
 	image_ratio = cfg.IMAGE.FINAL_DIM[0] / cfg.IMAGE.FINAL_DIM[1]
 	val_h = val_w * image_ratio
-	fig = plt.figure(figsize=(4 * val_w, 2 * val_h))
-	width_ratios = (val_w, val_w, val_w, val_w)
-	gs = mpl.gridspec.GridSpec(3, 4, width_ratios=width_ratios)
+	fig = plt.figure(figsize=(5 * val_w, 2 * val_h))
+	width_ratios = (val_w, val_w, val_w, val_w, val_w)
+	gs = mpl.gridspec.GridSpec(2, 5, width_ratios=width_ratios)
 	gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
 
 	denormalise_img = torchvision.transforms.Compose(
 		(NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 		 torchvision.transforms.ToPILImage(),))
 	for imgi, img in enumerate(image[0, -1]):
-		ax = plt.subplot(gs[imgi // 3, imgi % 3])
+		ax = plt.subplot(gs[imgi // 4, imgi % 4])
 		showimg = denormalise_img(img.cpu())
 		if imgi > 2:
 			showimg = showimg.transpose(Image.FLIP_LEFT_RIGHT)
 
-		# plt.annotate(cameras[imgi].replace('_', ' ').replace('CAM ', ''), (0.01, 0.87), c='white',
-		#              xycoords='axes fraction', fontsize=14)
+		plt.annotate(cameras[imgi], (0.01, 0.87), c='white',
+		             xycoords='axes fraction', fontsize=14)
 		plt.imshow(showimg)
 		plt.axis('off')
 
-	ax = plt.subplot(gs[:, 3])
+	ax = plt.subplot(gs[:, 4])
 	plt.imshow(make_contour(vis_image[::-1, ::-1]))
 	plt.axis('off')
 
@@ -121,72 +123,39 @@ def get_input_data_timestamp(loader, frame_idx, log_idx)-> None:
 def visualise(args):
 	checkpoint_path = args.checkpoint
 
-	trainer = TrainingModule.load_from_checkpoint(checkpoint_path)
-
-	# trainer.cfg.
-
-	device = torch.device('cuda:0')
-	# device = torch.device('cpu')
-
-	trainer = trainer.to(device)
+	trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=True)
+	print(f'Loaded weights from \n {checkpoint_path}')
 	trainer.eval()
 
-	root_dir = os.path.join(os.getcwd(), '../argoverse-api/data/argoverse-tracking/sample')
-	tracking_loader = ArgoverseTrackingLoader(root_dir)
+	device = torch.device('cuda:0')
+	trainer.to(device)
+	model = trainer.model
 
-	seconds_in_past = 1
-	frame_rate = 10
-	frames = [i for i in range(0, 10 + 1, 5)]
-	# frames = [100]
-	images_past = []
-	extrinsics = []
-	intrinsics = []
-	relative_egomotion = []
-	for i, frame_idx in enumerate(frames):
-		images_timestamp, intrinsics_timestamp, extrinsics_timestamp = \
-			get_input_data_timestamp(tracking_loader, frame_idx, tracking_loader.log_list[0])
+	cfg = model.cfg
+	cfg.GPUS = "[0]"
+	cfg.BATCHSIZE = 1
+	
 
-		# recast images_timestamp, intrs, extrs to tensors 
-		# of size(n_cameras, c, h, w) and append to lists
-		images_timestamp_tensor = torch.cat(images_timestamp, dim=0).unsqueeze(0).unsqueeze(0)
-		images_past.append(images_timestamp_tensor)
+	_, valloader = prepare_argoverse(cfg, mini_version=True)
 
-		intrinsics_timestamp_tensor = torch.cat(intrinsics_timestamp, dim=0).unsqueeze(0).unsqueeze(0)
-		intrinsics.append(intrinsics_timestamp_tensor)
-		
-		extrinsics_timestamp_tensor = torch.cat(extrinsics_timestamp, dim=0).unsqueeze(0).unsqueeze(0)
-		extrinsics.append(extrinsics_timestamp_tensor)
+	cfg.IMAGE.NAMES = valloader.dataset.camera_names
+	
 
-		#egomotion between 2 adjacent poses (frames)
-		egomotion = np.eye(4, dtype=np.float32)
-		if i < len(frames) - 1:
-			city_to_ego_present_T = tracking_loader.get_pose(frames[i]).transform_matrix
-			city_to_ego_next_T = tracking_loader.get_pose(frames[i+1]).transform_matrix
-			egomotion = np.linalg.inv(city_to_ego_present_T).dot(city_to_ego_next_T)
-		egomotion = torch.Tensor(egomotion).float()
-		pose_6dof_vec = mat2pose_vec(egomotion).unsqueeze(0).unsqueeze(0)
-		relative_egomotion.append(pose_6dof_vec)
+	for i, batch in enumerate(tqdm(valloader)):
+		images_past = batch['image'].to(device)
+		intrinsics = batch['intrinsics'].to(device)
+		extrinsics = batch['extrinsics'].to(device)
+		future_egomotion = batch['future_egomotion'].to(device)
 
-	images_past = torch.cat(images_past, dim=1)
-	intrinsics = torch.cat(intrinsics, dim=1)
-	extrinsics = torch.cat(extrinsics, dim=1)
-	relative_egomotion = torch.cat(relative_egomotion, dim=1)
-	print(f'images_past.shape: {images_past.shape}\nintrinsic_past.shape: {intrinsics.shape}\nextrinsics_past.shape: {extrinsics.shape}\npose_past.shape: {relative_egomotion.shape}')
+		with torch.no_grad():
+			output = model(images_past, intrinsics, extrinsics, future_egomotion)
 
-
-	images_past = images_past.float().to(device)
-	intrinsics = intrinsics.float().to(device)
-	extrinsics = extrinsics.float().to(device)
-	relative_egomotion = relative_egomotion.float().to(device)
-
-	with torch.no_grad():
-		output = trainer.model(images_past, intrinsics, extrinsics, relative_egomotion)
-
-	figure_numpy = plot_prediction(images_past, output, trainer.cfg)
-	showimg = Image.fromarray(figure_numpy)
-	plt.imshow(showimg)
-	plt.waitforbuttonpress()
-	plt.axis('off')
+		figure_numpy = plot_prediction(images_past, output, cfg)
+		showimg = Image.fromarray(figure_numpy)
+		plt.imshow(showimg)
+		plt.waitforbuttonpress()
+		plt.axis('off')
+	
 
 
 def test_extrinsics():
