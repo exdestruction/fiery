@@ -8,3 +8,5 @@ data/
 *.ipynb_checkpoints
 *.ipynb
 *.ckpt
+*.mp4
+*.txt

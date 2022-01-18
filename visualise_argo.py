@@ -131,12 +131,12 @@ def visualise(args):
 	trainer = trainer.to(device)
 	trainer.eval()
 
-	root_dir = os.path.join(os.getcwd(), 'argoverse-api/data/argoverse-tracking/sample')
+	root_dir = os.path.join(os.getcwd(), '../argoverse-api/data/argoverse-tracking/sample')
 	tracking_loader = ArgoverseTrackingLoader(root_dir)
 
 	seconds_in_past = 1
 	frame_rate = 10
-	frames = [i for i in range(0, seconds_in_past * frame_rate + 1, 5)]
+	frames = [i for i in range(0, 10 + 1, 5)]
 	# frames = [100]
 	images_past = []
 	extrinsics = []
@@ -201,8 +201,8 @@ def test_extrinsics():
 
 if __name__ == '__main__':
 	parser = ArgumentParser(description='Fiery visualisation')
-	parser.add_argument('--checkpoint', default='./fiery/checkpoints/fiery.ckpt', type=str, help='path to checkpoint')
-	parser.add_argument('--config', default='fiery/configs/argoverse/single_timeframe.yml', type=str, help='path to config file')
+	parser.add_argument('--checkpoint', default='checkpoints/argoverse_epoch=7-step=3599.ckpt', type=str, help='path to checkpoint')
+	parser.add_argument('--config', default='fiery/configs/argoverse/baseline.yml', type=str, help='path to config file')
 	args = parser.parse_args()
 
 	visualise(args)

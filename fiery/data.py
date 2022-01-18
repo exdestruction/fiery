@@ -872,4 +872,3 @@ if __name__ == "__main__":
 
 	argoverse = ArgoverseFPD(cfg)
 	something = argoverse.visualize_sample(argoverse[9])
-		# sample = obj[0]
